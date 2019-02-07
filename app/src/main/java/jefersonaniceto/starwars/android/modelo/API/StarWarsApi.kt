@@ -12,76 +12,72 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 
 
-class StarWarsApi {
+class StartWarsApi {
 
+    val service : StarWarsApiDef
+    val personCache = mutableMapOf<String, Person>()
 
+    init {
 
+        val logging = HttpLoggingInterceptor()
+        logging.level = HttpLoggingInterceptor.Level.BODY
 
-        val service : StarWarsApiDef
-        val personCache = mutableMapOf<String, Person>()
+        val httpClient = OkHttpClient.Builder()
+        httpClient.addInterceptor(logging)
 
-        init {
+        val gson = GsonBuilder().setLenient().create()
 
-            val logging = HttpLoggingInterceptor()
-            logging.level = HttpLoggingInterceptor.Level.BODY
+        val retrofit = Retrofit.Builder()
+            .baseUrl("http://swapi.co/api/")
+            .addCallAdapterFactory(RxJavaCallAdapterFactory.create())
+            .client(httpClient.build())
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
 
-            val httpClient = OkHttpClient.Builder()
-            httpClient.addInterceptor(logging)
+        service = retrofit.create<StarWarsApiDef>(StarWarsApiDef::class.java)
+    }
 
-            val gson = GsonBuilder().setLenient().create()
+    fun loadMovies() : Observable<Movie> {
+        return service.listMoves()
+            .flatMap { filmeResult -> Observable.from(filmeResult.results) }
+            .flatMap { film -> Observable.just(Movie(film.title, film.episodeId, ArrayList<Character>())) }
+    }
 
-            val retrofit = Retrofit.Builder()
-                .baseUrl("http://swapi.co/api/")
-                .addCallAdapterFactory(RxJavaCallAdapterFactory.create())
-                .client(httpClient.build())
-                .addConverterFactory(GsonConverterFactory.create(gson))
-                .build()
-
-            service = retrofit.create<StarWarsApiDef>(StarWarsApiDef::class.java)
-        }
-
-        fun loadMovies() : Observable<Movie> {
-            return service.listMoves()
-                .flatMap { filmeResult -> Observable.from(filmeResult.results) }
-                .flatMap { film -> Observable.just(Movie(film.title, film.episodeId, ArrayList<Character>())) }
-        }
-
-        fun loadMoviesFull() : Observable<Movie> {
-            return service.listMoves()
-                .flatMap { filmeResult -> Observable.from(filmeResult.results) }
-                .flatMap { film ->
-                    Observable.zip(
-                        Observable.just(Movie(film.title, film.episodeId, ArrayList<Character>())),
-                        Observable.from(film.personUrls)
-                            .flatMap { personUrl ->
-                                Observable.concat(
-                                    getCache(personUrl),
-                                    service.loadPerson(Uri.parse(personUrl).lastPathSegment).doOnNext { person ->
-                                        Log.d("NGVL", "BAIXANDO -----> $personUrl")
-                                        personCache.put(personUrl, person)
-                                    }
-                                ).first()
-                            }.flatMap { person ->
-                                Observable.just(Character(person.name, person.gender))
-                            }
-                            .toList(),
-                        {
-                                movie , characters ->
-                            movie.characters.addAll(characters)
-                            movie
+    fun loadMoviesFull() : Observable<Movie> {
+        return service.listMoves()
+            .flatMap { filmeResult -> Observable.from(filmeResult.results) }
+            .flatMap { film ->
+                Observable.zip(
+                    Observable.just(Movie(film.title, film.episodeId, ArrayList<Character>())),
+                    Observable.from(film.personUrls)
+                        .flatMap { personUrl ->
+                            Observable.concat(
+                                getCache(personUrl),
+                                service.loadPerson(Uri.parse(personUrl).lastPathSegment).doOnNext { person ->
+                                    Log.d("NGVL", "BAIXANDO -----> $personUrl")
+                                    personCache.put(personUrl, person)
+                                }
+                            ).first()
+                        }.flatMap { person ->
+                            Observable.just(Character(person.name, person.gender))
                         }
-                    )
-                }
-        }
+                        .toList(),
+                    {
+                            movie , characters ->
+                        movie.characters.addAll(characters)
+                        movie
+                    }
+                )
+            }
+    }
 
-        private fun getCache(personUrl : String) : Observable<Person> {
-            return Observable.from(personCache.keys)
-                .filter { key -> key == personUrl }
-                .flatMap { key ->
-                    Log.d("NGVL", "Cache -----> $key")
-                    Observable.just(personCache[personUrl])
+    private fun getCache(personUrl : String) : Observable<Person> {
+        return Observable.from(personCache.keys)
+            .filter { key -> key == personUrl }
+            .flatMap {key ->
+                Log.d("NGVL", "Cache -----> $key")
+                Observable.just(personCache[personUrl])
+            }
+    }
 
-                }
-        }
 }
-
